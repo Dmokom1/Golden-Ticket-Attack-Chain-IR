@@ -98,11 +98,11 @@ NT Hash              : b3c4f1a8d2e...9f7a
 
 `lsadump::dcsync` was additionally executed as a replication-based alternative, simulating the technique used by threat actors who cannot gain interactive DC access but hold `DS-Replication-Get-Changes-All` rights.
 
-![Phase 2 - Mimikatz SeDebugPrivilege Assert](screenshots/03-Mimikatz-SeDebugPrivilege.jpeg)
+![Phase 2 - Mimikatz SeDebugPrivilege Assert](screenshots/03-Mimikatz-SeDebugPrivilege.png)
 
-![Phase 2 - KRBTGT Hash Extraction via lsadump::lsa](screenshots/04-KRBTGT-Hash-Extraction.jpeg)
+![Phase 2 - KRBTGT Hash Extraction via lsadump::lsa](screenshots/04-KRBTGT-Hash-Extraction.png)
 
-![Phase 2 - DCSync Replication Attack](screenshots/05-DCSync-Replication-Attack.jpeg)
+![Phase 2 - DCSync Replication Attack](screenshots/05-DCSync-Replication-Attack.png)
 
 ---
 
@@ -144,9 +144,9 @@ mimikatz # kerberos::list
    Flags             : ...
 ```
 
-![Phase 3 - Golden Ticket Forgery Output](screenshots/06-Golden-Ticket-Forgery.jpeg)
+![Phase 3 - Golden Ticket Forgery Output](screenshots/06-Golden-Ticket-Forgery.png)
 
-![Phase 3 - Kerberos Cache Injection (kerberos::list)](screenshots/07-Kerberos-Cache-Injection.jpeg)
+![Phase 3 - Kerberos Cache Injection (kerberos::list)](screenshots/07-Kerberos-Cache-Injection.png)
 
 ---
 
@@ -173,7 +173,7 @@ dir \\DC01.lab.local\C$
 
 Full administrative access was confirmed on `DC01.lab.local` using a principal that has no corresponding object in the directory. This validates the core premise of the Golden Ticket: the KDC is never queried for ticket validation — the service (in this case, the SMB server's Kerberos AP_REQ handler) trusts the PAC data embedded in the forged ticket.
 
-![Phase 4 - SMB C$ Access with Forged Ticket](screenshots/08-SMB-C-Share-Access-Validated.jpeg)
+![Phase 4 - SMB C$ Access with Forged Ticket](screenshots/08-SMB-C-Share-Access-Validated.png)
 
 ---
 
@@ -210,15 +210,15 @@ event.dataset: "network_traffic.netflow" AND network.protocol: "netlogon" AND wi
 
 The rule correlated with `Event ID 4742` (Computer Account Changed) and `Event ID 5805` (Netlogon session setup failure from a machine account) to confirm the exploitation pattern.
 
-![Phase 5 - Elastic SIEM Dashboard Overview](screenshots/09-Elastic-SIEM-Dashboard-Overview.jpeg)
+![Phase 5 - Elastic SIEM Dashboard Overview](screenshots/09-Elastic-SIEM-Dashboard-Overview.png)
 
-![Phase 5 - LSASS Access Alert Triggered](screenshots/10-LSASS-Access-Alert-Triggered.jpeg)
+![Phase 5 - LSASS Access Alert Triggered](screenshots/10-LSASS-Access-Alert-Triggered.png)
 
-![Phase 5 - Sysmon Event ID 10 Raw Log](screenshots/11-Sysmon-EventID10-Raw-Log.jpeg)
+![Phase 5 - Sysmon Event ID 10 Raw Log](screenshots/11-Sysmon-EventID10-Raw-Log.png)
 
-![Phase 5 - Zerologon Detection Rule Hit](screenshots/12-Zerologon-Detection-Rule.jpeg)
+![Phase 5 - Zerologon Detection Rule Hit](screenshots/12-Zerologon-Detection-Rule.png)
 
-![Phase 5 - SIEM Alert Mimikatz Detection](screenshots/13-SIEM-Alert-Mimikatz-Detection.jpeg)
+![Phase 5 - SIEM Alert Mimikatz Detection](screenshots/13-SIEM-Alert-Mimikatz-Detection.png)
 
 ---
 
