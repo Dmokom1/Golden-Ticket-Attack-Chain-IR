@@ -1,82 +1,75 @@
 ---
-# Operator Notes — Golden Ticket Lab: Troubleshooting Log
 
-**Format:** Raw working notes, unedited — documented as encountered during the engagement.
+# Personal_Notes.md
 
----
+## Troubleshooting Log — Real Issues Faced During This Lab
 
-## Issue 1 — Kerberos Encryption Downgrade Conflict
-
-**Problem:** 
-Initial ticket forgery attempts using `/aes256` failed with a `KRB_AP_ERR_MODIFIED` error when the forged ticket was presented to the SMB service. The ticket was being rejected at the AP_REQ stage despite a valid krbtgt hash.
-
-**Root Cause:** 
-The target server's Kerberos stack expected an AES256-encrypted session key within the PAC, but the forged ticket's session key was being generated using the RC4 key schedule when `/aes256` and `/rc4` flags were both omitted (Mimikatz defaults vary by build version). The mismatch between the PAC session key and the service's expected encryption type caused AP validation to fail silently.
-
-**Resolution:** 
-Explicitly specified `/rc4:[hash]` without mixing `/aes256` in the same command. RC4-HMAC (`0x17`) is sufficient for PAC trust validation against unpatched DCs and avoids the encryption negotiation mismatch. For AES256 forgery, the `krbtgt` AES256 key (not NTLM hash) must be extracted separately via `lsadump::dcsync /user:krbtgt /csv` and passed via `/aes256:[key]`.
-
-**Lesson:** 
-Always match the encryption type of the forged ticket to the DC's supported and expected types. Do not assume Mimikatz will select the correct algorithm automatically. When in doubt, check the Kerberos supported encryption types via: `klist tickets` and inspect the `EType` field.
+The following is a candid account of the actual problems encountered during the lab build and attack execution. These notes are kept for personal reference and to improve future lab iterations.
 
 ---
 
-## Issue 2 — Hostname Syntax Errors Breaking SMB Validation
+### Issue 1: RC4 vs AES256 Encryption Mismatch Causing Ticket Rejection
 
-**Problem:** 
-After injecting the ticket with `/ptt`, `dir \\DC01\C$` returned `System error 5: Access is denied` consistently, despite `kerberos::list` confirming the forged TGT was present in the logon session cache.
+This was the first major blocker and cost several hours of debugging. The initial Golden Ticket was forged using the default RC4 encryption type (0x17), but the domain controller WIN-HS48GJMNOGP.cs.local had a Group Policy setting that enforced AES256 (0x12) for Kerberos ticket encryption on certain service accounts. When the RC4 forged ticket was presented to services that required AES256, the KDC rejected the ticket with a KRB_AP_ERR_MODIFIED error, which at first looked like the ticket itself was invalid or the hash was wrong.
 
-**Root Cause:** 
-The SMB access attempt was using the NetBIOS short name (`DC01`) rather than the fully qualified domain name (`DC01.lab.local`). Kerberos SPN resolution is DNS-FQDN-dependent — the service principal being requested was `cifs/DC01` instead of `cifs/DC01.lab.local`. Since the forged TGT is presented to the KDC to request a service ticket, the SPN must resolve correctly against the directory. Alternatively, if no KDC is contacted (ticket already present), NTLM fallback was being attempted, which failed because the forged identity doesn't exist.
+Root cause: mixed encryption policy across the domain — some services accepted RC4, others did not.
 
-**Resolution:** 
-Switched to the FQDN: `dir \\DC01.lab.local\C$`. Immediate successful access. The Kerberos SPN lookup resolved correctly, and the cached service ticket for `cifs/DC01.lab.local` was issued and accepted.
+Fix: Identified which services enforced AES256, then re-forged the ticket explicitly specifying /aes256 flag in Mimikatz after extracting the AES256 KRBTGT key separately via lsadump::dcsync. Confirmed that the /crypto:aes256 flag must be paired with the correct AES256 hash, not the NTLM hash.
 
-**Lesson:** 
-Always use FQDN syntax when validating Pass-the-Ticket scenarios. NetBIOS name resolution can trigger NTLM fallback, which will fail for non-existent forged identities. If NTLM fallback is disabled via GPO (`LAN Manager authentication level: Send NTLMv2 response only, refuse LM & NTLM`), the failure mode is even more obvious, but in default lab configs, the silent NTLM fallback masks the root cause.
+Lesson: Always verify the Kerberos encryption type supported by target services before forging. If the environment enforces AES256 via GPO, RC4 tickets will silently fail on specific SPNs.
 
 ---
 
-## Issue 3 — SIEM Log Ingestion Delays Causing False Negatives in Alert Timing
+### Issue 2: Hostname FQDN Requirement for Kerberos SPN Resolution
 
-**Problem:** 
-After executing `privilege::debug` + `lsadump::lsa /patch`, the expected Sysmon Event ID 10 alert did not fire in Kibana within the expected 60-second window. Manually querying the index showed no documents from the DC for a ~7-minute period.
+SMB access to \\WIN-HS48GJMNOGP\C$ using only the NetBIOS hostname failed silently — the connection fell back to NTLM authentication instead of using the forged Kerberos ticket, which defeated the point of the exercise. No error was thrown; it simply authenticated via a different mechanism.
 
-**Root Cause:** 
-Winlogbeat's `harvester_limit` and `close_inactive` settings were set to their defaults, and a prior high-volume log burst (generated during Zerologon simulation) had saturated the Elasticsearch bulk ingest queue. Winlogbeat was buffering events locally and the ingest pipeline backpressure caused a queue hold without dropping events.
+Root cause: Kerberos SPN resolution requires the fully qualified domain name (FQDN). When only the short hostname is used, Windows automatically downgrades to NTLM, bypassing the Kerberos cache entirely.
 
-**Resolution:** 
-Increased Elasticsearch ingest node heap allocation from 1GB to 4GB and tuned Winlogbeat's `bulk_max_size` from 50 to 200, with `worker: 4`. Also explicitly set `index.refresh_interval: 5s` on the `winlogbeat-*` index template to force faster segment visibility. After these changes, alert latency dropped from ~7 minutes to ~4 seconds.
+Fix: Changed all post-exploitation commands to use the full FQDN: \\WIN-HS48GJMNOGP.cs.local\C$ — this forced Kerberos ticket usage and the forged ticket was correctly consumed.
 
-**Lesson:** 
-Default Elastic Stack configurations are not production-ready for high-throughput adversary simulation. Always pre-tune ingest pipeline capacity before running detection validation. A log gap during active adversary simulation is indistinguishable from a real attacker clearing logs — the tooling must keep up.
+Lesson: Always use FQDN in post-exploitation access commands when operating in Kerberos-authenticated environments. NetBIOS name resolution silently triggers NTLM fallback, which will not use injected Kerberos tickets.
 
 ---
 
-## Issue 4 — Mimikatz Blocked by Windows Defender (Evasion Required)
+### Issue 3: SIEM Log Ingestion Delays
 
-**Problem:** 
-Initial Mimikatz execution on the DC was terminated before `privilege::debug` could complete. Windows Defender flagged the binary based on static PE signature matching.
+Elastic SIEM was not showing expected Event ID 4769 and 4624 alerts in real time. Events appeared in the raw index (winlogbeat-*) but were not surfacing in the SIEM detection rules dashboard for 3-8 minutes after the actual attack events occurred.
 
-**Resolution:** 
-Recompiled Mimikatz from source with modified PE headers (changed section names, stripped debug symbols, randomized export table ordering). Additionally, loaded the binary via a reflective DLL injection loader to avoid touching disk. In a production red team context, Cobalt Strike's `mimikatz` module or `execute-assembly` with an obfuscated assembly would be the operationally sound approach.
+Root cause: Winlogbeat forwarding interval was set to 10 seconds, but the Elastic ingest pipeline had a backlog due to insufficient heap memory allocated to the Elasticsearch node (running on a 4GB RAM VM). The detection rule refresh interval was also set to 5 minutes instead of 1 minute.
 
-**Lesson:** 
-Stock Mimikatz binaries are near-universally signature-detected. Any serious engagement requires either BYOL (Bring Your Own Loader), in-memory execution, or leveraging built-in Windows tooling (`comsvcs.dll MiniDump`, `Task Manager memory dump`) to achieve the same outcome without triggering AV.
+Fix: Increased Elasticsearch JVM heap to 2GB (half of available RAM per Elastic guidance), reduced the detection rule polling interval in Kibana to 1 minute, and tuned the Winlogbeat bulk_max_size from 2048 to 512 to reduce ingest batch latency.
+
+Lesson: In resource-constrained lab environments, SIEM detection latency is a real operational variable. Tuning ingest pipeline heap and rule polling intervals is essential for near-real-time detection validation.
 
 ---
 
-## Issue 5 — KRBTGT Password Last Set Timestamp Invalidated Forged Ticket
+### Issue 4: Mimikatz AV Evasion
 
-**Problem:** 
-In a second iteration test (after a deliberate KRBTGT rotation to simulate incident response), forged tickets from the previous hash were correctly rejected. However, the new ticket forged with the rotated hash was also being rejected with `KRB_AP_ERR_TKT_NYV` (Ticket not yet valid).
+Even with Windows Defender disabled at the policy level, Windows Smart App Control and some residual AMSI hooks in PowerShell were flagging Mimikatz execution when called from a PowerShell session. Running Mimikatz directly from cmd.exe as a standalone binary was more reliable than invoking it via PowerShell Invoke-Mimikatz scripts.
 
-**Root Cause:** 
-The DC's system clock and the attack workstation's clock had drifted by ~6 minutes, exceeding the default Kerberos clock skew tolerance of 5 minutes. Kerberos is extremely sensitive to time synchronization — a clock delta beyond the tolerance window causes all ticket validation to fail regardless of cryptographic correctness.
+Root cause: AMSI (Antimalware Scan Interface) in PowerShell inspects script content and memory buffers regardless of Defender real-time protection state. Smart App Control added an additional layer of reputation-based blocking on unsigned binaries.
 
-**Resolution:** 
-Forced NTP sync on the attacker workstation: `w32tm /resync /force`. Clock delta dropped to <1 second. Subsequent ticket forgery and validation succeeded immediately.
+Fix: Executed Mimikatz directly as a compiled binary from an elevated cmd.exe session rather than through PowerShell. In future iterations, will test obfuscated or compiled variants (e.g., SafetyKatz, custom-compiled Mimikatz with modified PE headers) to simulate realistic adversary evasion.
 
-**Lesson:** 
-Always validate time synchronization before beginning Kerberos-based attack phases. In air-gapped or isolated lab environments, the hypervisor's time sync may drift from the DC's authoritative NTP source. A `w32tm /stripchart /computer:DC01.lab.local` will expose any meaningful skew before it becomes a troubleshooting rabbit hole.
+Lesson: Disabling Windows Defender real-time protection does not disable AMSI. These are separate subsystems. For realistic lab simulations, both must be addressed independently.
 
+---
+
+### Issue 5: Time Sync Drift Causing Ticket Validation Failures
+
+Intermittently, the forged Kerberos ticket was being rejected with a KRB_AP_ERR_SKEW error, which indicates a clock skew greater than 5 minutes between the client machine and the KDC (WIN-HS48GJMNOGP.cs.local).
+
+Root cause: The Kali attacker VM and the Windows lab VMs were running on the same hypervisor but had diverged in system time by approximately 7 minutes due to the VMs being suspended and resumed at different intervals. Kerberos has a strict 5-minute clock skew tolerance by default (RFC 4120), and exceeding this threshold causes ticket validation to fail entirely.
+
+Fix: Forced NTP synchronization on both VMs:
+    On Windows: w32tm /resync /force
+    On Kali: ntpdate -u pool.ntp.org (then timedatectl set-ntp true)
+
+Confirmed time delta was within 60 seconds before re-injecting the ticket, which resolved the KRB_AP_ERR_SKEW errors immediately.
+
+Lesson: Time synchronization is a prerequisite for any Kerberos-based attack or defense exercise. Always verify system clock alignment across all lab machines before beginning. In production environments, adversaries may also deliberately manipulate clock skew as an anti-forensics technique to invalidate Kerberos log timestamps.
+
+---
+
+End of Personal_Notes.md
