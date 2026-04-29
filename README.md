@@ -31,7 +31,7 @@ Prior to execution, Windows Defender real-time protection was disabled on the ta
 
 Mimikatz was transferred to the target system via SMB staging directory. The binary was extracted and staged for execution in the next phase.
 
-![Mimikatz File Extracted](screenshots/04_Mimikatz_File_Extracted.png)
+![Mimikatz File Extracted](screenshots/04_Mimikatz_Files_Extracted.png)
 
 ---
 
