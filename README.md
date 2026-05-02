@@ -132,7 +132,7 @@ Mimikatz was transferred and extracted onto `WIN-HS48GJMN0GP` under the `cs.loca
 
 **Step 4 — Mimikatz Binary Extracted to Disk:**
 
-![Mimikatz File Extracted](screenshots/04_Mimikatz_File_Extracted.png)
+![Mimikatz File Extracted](screenshots/04_Mimikatz_Files_Extracted.png)
 
 *Mimikatz extracted to disk on WIN-HS48GJMN0GP. File hash confirmed. Staging complete. No AV alerts generated (Defender previously disabled).*
 
@@ -173,7 +173,7 @@ OS           : Windows Server 2022 (Build 20348)
 
 **Step 7 — KRBTGT Hash Extracted:**
 
-![KRBTGT Hash Extracted](screenshots/07_KRBTGT_Hash_Extracted.png)
+![KRBTGT Hash Extracted](screenshots/07_KRBTGT_Hash_Dumped.png)
 
 *`lsadump::lsa /patch` executed. KRBTGT NTLM hash extracted: **4c89c456b825f173d94aefc94d8718bd**. Domain SID confirmed: **S-1-5-21-426635828-459186537-2548376310**. Domain: **cs.local**.*
 
@@ -205,7 +205,7 @@ Unlike Silver Tickets, this Golden Ticket is **not scoped to any single service*
 
 **Step 9 — Golden Ticket Forged:**
 
-![Golden Ticket Forged](screenshots/09_Golden_Ticket_Forged.png)
+![Golden Ticket Forged](screenshots/08_Golden_Ticket_Forged.png)
 
 *Mimikatz `kerberos::golden` executed. Forged TGT generated using KRBTGT hash 4c89c456b825f173d94aefc94d8718bd for domain cs.local (SID: S-1-5-21-426635828-459186537-2548376310). Ticket written to disk.*
 
@@ -213,7 +213,7 @@ Unlike Silver Tickets, this Golden Ticket is **not scoped to any single service*
 
 **Step 10 — Golden Ticket Injected into Kerberos Session:**
 
-![Golden Ticket Injected into Kerberos Session](screenshots/10_Golden_Ticket_Injected_Kerberos_Session.png)
+![Golden Ticket Injected into Kerberos Session](screenshots/9_Golden_Ticket_Injected_Kerberos_Session.png)
 
 *`kerberos::ptt` executed. Forged Golden Ticket injected into current Kerberos session on WIN-HS48GJMN0GP. No KDC contact required. Pass-the-Ticket (T1550.003) confirmed.*
 
