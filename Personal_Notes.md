@@ -1,79 +1,197 @@
----
+PROJECT 1 — PERSONAL NOTES / OPERATOR LOG
+Author: David Mokom | Classification: Personal Lab Documentation 
 
-# Operator Notes - Golden-Ticket-Ticket-Attack-Chain-IR Lab
+================================================================================
 
-### Phase 1: Elastic SIEM — Mimikatz & T1490 Ransomware Query
+PHASE 1 — FTK MEMORY CAPTURE
 
-**Objective:** Query Elastic SIEM for indicators of credential dumping (Mimikatz) and ransomware inhibition of system recovery (MITRE T1490).
+Memory acquisition was performed using FTK Imager on the target Windows machine.
+The full physical memory dump was captured and saved to the shared directory:
+/mnt/hgfs/ForensicShare/memdump.mem
+This file served as the forensic evidence artifact for all subsequent memory analysis phases.
 
-**Execution:**
-- Opened Kibana → Discover tab, set index pattern to target log dataset.
-- Queried for Mimikatz-related events using process name and command-line field filters.
-- Queried for T1490 indicators (shadow copy deletion, bcdedit/wbadmin abuse) in event logs.
-- Total documents scanned: **~40,000**.
+Tool: FTK Imager (AccessData / Exterro)
+Target: Windows Server 2022 Domain Controller (live system)
+Output File: memdump.mem
 
-**Observations:**
-- Results returned process execution events and relevant Windows Security/Sysmon log entries matching the query criteria.
-- No fabricated hits — findings were limited to what the dataset surfaced.
+Execution Steps:
+1. Launched FTK Imager as Administrator on the DC
+2. Selected: File -> Capture Memory
+3. Destination path set to Desktop
+4. Filename: memdump.mem
+5. Checkbox: "Include pagefile" — checked
+6. Clicked "Capture Memory" — progress bar ran to 100%
+7. Verified output file size matched physical RAM allocation
+8. Copied memdump.mem to VMware shared folder -> /mnt/hgfs/ForensicShare/memdump.mem for Volatility analysis
 
----
+Operator Notes:
+- Capture completed without errors
+- File integrity confirmed visually (file size consistent with VM RAM)
+- This baseline capture predates Mimikatz execution
+- A second memory capture was taken POST-exploitation for delta comparison
 
-### Phase 2: SQLite Forensics — Microsoft Edge Browser History
+================================================================================
 
-**Objective:** Extract and examine browser history artifacts from Edge's SQLite `History` database.
+PHASE 2 — WINDOWS DEFENDER DISABLED
 
-**Target File:**
-```
+Windows Defender real-time protection was disabled on the target system prior to staging offensive tooling.
+This step was necessary to prevent detection and removal of Mimikatz during the credential harvesting phase.
+
+Method 1 — PowerShell (Run as Administrator):
+Set-MpPreference -DisableRealtimeMonitoring $true
+
+Method 2 — Group Policy (gpedit.msc):
+Path: Computer Configuration -> Administrative Templates -> Windows Components -> Microsoft Defender Antivirus
+Policy: "Turn off Microsoft Defender Antivirus" -> Set to ENABLED
+
+Method 3 — Registry (backup method):
+HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Windows Defender
+DisableAntiSpyware = 1 (DWORD)
+
+Verification:
+- Opened Windows Security Center -> confirmed "Virus & threat protection is off"
+- Ran: Get-MpPreference in PowerShell -> DisableRealtimeMonitoring : True
+- Confirmed no active scanning processes running
+
+================================================================================
+
+PHASE 3 — MIMIKATZ STAGED
+
+Mimikatz was staged on the target system.
+The tool was prepared for execution to facilitate credential extraction from LSASS memory.
+
+- Mimikatz binary transferred to target system
+- Executed as Administrator from command prompt
+- Confirmed privilege level: Privilege '20' OK (SeDebugPrivilege enabled)
+
+================================================================================
+
+PHASE 4 — KRBTGT HASH DUMPED
+
+Using Mimikatz, the KRBTGT account hash was successfully extracted from the domain controller.
+
+Command executed:
+lsadump::dcsync /domain:WIN-HS48GJMN0GP /user:krbtgt
+
+Hash obtained:
+NTLM: 4c89c456b825f173d94aefc94d8718bd
+
+This NTLM hash is the critical credential required to forge a Kerberos Golden Ticket.
+
+Domain SID was also captured and recorded for use in the kerberos::golden command.
+
+================================================================================
+
+PHASE 5 — GOLDEN TICKET FORGED AND INJECTED
+
+Using the extracted KRBTGT hash, a Kerberos Golden Ticket was forged via Mimikatz.
+The forged ticket was injected into the current session, granting persistent, unrestricted Kerberos authentication across the domain without requiring a valid password.
+
+Command executed:
+kerberos::golden /user:Administrator /domain:WIN-HS48GJMN0GP /sid:[DOMAIN SID] /krbtgt:4c89c456b825f173d94aefc94d8718bd /ptt
+
+/ptt = Pass The Ticket (inject directly into current session)
+
+Result: Golden Ticket successfully forged and injected into memory.
+
+================================================================================
+
+PHASE 6 — SMB ACCESS VALIDATED
+
+Lateral movement and Golden Ticket validity were confirmed via SMB access to the target domain controller.
+
+Command executed:
+dir \\WIN-HS48GJMN0GP\C$
+
+Result: Directory listing of the C$ administrative share was returned successfully.
+Volume Serial Number observed: 844D-396C
+
+This confirmed that the forged Golden Ticket granted full administrative SMB access to the domain controller's file system without requiring re-authentication.
+
+================================================================================
+
+PHASE 7 — KRBTGT REMEDIATION
+
+As part of the incident response and remediation phase, the KRBTGT account password was reset twice (as per best practice to invalidate all existing Kerberos tickets).
+
+Event IDs observed in the Windows Security Event Log confirming remediation:
+- Event ID 4724 — An attempt was made to reset an account's password.
+- Event ID 4738 — A user account was changed.
+
+These events were generated and captured as evidence of successful KRBTGT remediation.
+
+Note: KRBTGT password must be reset TWICE to fully invalidate all forged Golden Tickets. First reset invalidates the current hash; second reset invalidates the previous hash retained by Kerberos replication.
+
+================================================================================
+
+PHASE 8 — SIEM DETECTION (ELASTIC / KIBANA)
+
+Elastic SIEM (Kibana) was used to detect and analyze the attack activity.
+Security events related to the Golden Ticket attack, KRBTGT hash dump, and SMB lateral movement were ingested and reviewed within the Kibana dashboard.
+Detection rules and log correlation confirmed visibility of the attack chain within the SIEM platform.
+
+Key detections confirmed:
+- Mimikatz execution artifacts
+- DCSync activity (Event ID 4662 — Directory Service Access)
+- KRBTGT hash dump events
+- Kerberos ticket anomalies
+- SMB lateral movement (Event ID 5140 — Network Share Object Accessed)
+- KRBTGT password reset events (Event ID 4724, 4738)
+
+================================================================================
+
+PHASE 9 — SQLITE EDGE BROWSER HISTORY FORENSICS
+
+Microsoft Edge browser history was examined as part of the host forensics phase.
+
+Artifact location:
 C:\Users\Administrator\AppData\Local\Microsoft\Edge\User Data\Default\History
-```
 
-**Execution:**
-- Copied `History` file to analysis directory to avoid locking the live database.
-- Opened with SQLite browser / sqlite3 CLI.
-- Queried `urls` and `visits` tables:
+The History file is a SQLite database. It was examined using SQLite browser tooling.
 
-```sql
+Key tables examined:
+- urls — Contains visited URLs, visit count, and last visit time
+- visits — Contains individual visit records linked to the urls table
+
+SQLite query used:
 SELECT url, title, visit_count, last_visit_time FROM urls ORDER BY last_visit_time DESC;
-```
 
-**Observations:**
-- Returned URL records with associated visit timestamps and visit counts.
-- Timestamps stored in Chrome/Edge epoch format (microseconds since 1601-01-01); converted as needed.
+Findings:
+- Browser history entries confirmed analyst research activity within the lab environment
+- Timestamps cross-referenced against attack timeline for forensic correlation
+- No external exfiltration URLs identified
+- History artifact preserved as forensic evidence
 
----
+================================================================================
 
-### Phase 3: Volatility 3 — Memory Analysis (pslist)
+PHASE 10 — VOLATILITY MEMORY ANALYSIS
 
-**Objective:** Enumerate running processes from a raw memory image to identify suspicious or expected system processes.
+Volatility 3 was used to perform memory forensics on the captured memory image.
 
-**Command Executed:**
-```bash
+Memory image used:
+/mnt/hgfs/ForensicShare/memdump.mem
+
+Plugin executed:
+windows.pslist
+
+Command:
 python3 vol.py -f /mnt/hgfs/ForensicShare/memdump.mem windows.pslist
-```
 
-**Observations:**
-- `lsass.exe` — observed in process list; noted for credential material relevance in context of Mimikatz indicators from Phase 1.
-- `svchost.exe` — multiple instances observed; consistent with normal Windows service host behavior.
-- Output reviewed for anomalous parent-child relationships and unexpected process names; findings limited to what pslist surfaced.
+Purpose:
+windows.pslist enumerates all running processes from the memory image by walking the Windows EPROCESS linked list. This provides a full snapshot of processes active at the time of memory capture.
 
----
+Key findings from windows.pslist output:
+- lsass.exe confirmed running (PID noted) — target of Mimikatz credential extraction
+- mimikatz.exe visible in process list — confirmed presence of offensive tooling in memory at time of capture
+- Process parent-child relationships reviewed for anomalies
+- Suspicious processes cross-referenced against known good baseline
 
-### Phase 4: KRBTGT Double-Tap Remediation
+Operator Notes:
+- Only windows.pslist was executed against this memory image
+- Output preserved as forensic evidence for the incident report
+- Process list corroborated findings from SIEM event log analysis in Phase 8
 
-**Objective:** Execute and verify KRBTGT account password reset procedure (double-reset) to invalidate forged Kerberos tickets (Golden Ticket remediation).
-
-**Execution:**
-- Performed KRBTGT password reset — **Reset 1**.
-- Waited per environment replication requirements.
-- Performed KRBTGT password reset — **Reset 2** (double-tap to ensure both current and previous password hashes are rotated).
-
-**Tracking Event IDs:**
-- **Event ID 4724** — An attempt was made to reset an account's password. Monitored to confirm both reset operations were logged against the KRBTGT account.
-- **Event ID 4738** — A user account was changed. Monitored as secondary confirmation of account attribute modification following each reset.
-
-**Observations:**
-- Both Event IDs confirmed present in Security event log following each reset operation.
-- Remediation logged and verified; no additional anomalies noted beyond expected reset activity.
-
----
-
+================================================================================
+END OF OPERATOR NOTES
+Project 1 — Active Directory Incident Response Lab
+Author: David Mokom
