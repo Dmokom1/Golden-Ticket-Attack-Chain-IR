@@ -29,13 +29,14 @@
 
 ---
 
-## Overview
+## Executive Summary
 
-This project demonstrates a simulated Advanced Persistent Threat (APT) attack lifecycle against an Active Directory environment. The lab covers the full kill chain: memory acquisition baseline, defense evasion, credential dumping via Mimikatz, Kerberos Golden Ticket forgery and injection, post-exploitation access validation, SIEM alerting, incident response remediation, ransomware telemetry analysis, browser forensic artifact extraction, and Volatility 3 post-compromise memory analysis.
-
-Built entirely within an isolated virtual lab environment following real-world Red Team and Blue Team (Purple Team) methodologies.
-
+This engagement simulates an Advanced Persistent Threat (APT) attack lifecycle against an Active Directory environment, followed by a full NIST SP 800-61 aligned Incident Response workflow. The lab covers the full kill chain: memory acquisition baseline, defense evasion, credential dumping via Mimikatz, Kerberos Golden Ticket forgery and injection, post-exploitation access validation, SIEM alerting, incident response remediation, ransomware telemetry analysis, browser forensic artifact extraction, and Volatility 3 post-compromise memory analysis. Built entirely within an isolated virtual lab environment following real-world Purple Team methodologies.
 ---
+
+## Incident Response Documentation
+A formal incident response report was drafted in accordance with the NIST SP 800-61 framework, detailing the preparation, detection and analysis, containment, eradication, and recovery phases of the engagement.
+[View the full NIST SP 800-61 Incident Response Report Here](reports/NIST_SP_800_61_Report.pdf)
 
 ## Lab Environment
 
@@ -196,9 +197,9 @@ The SIEM (Elastic Stack / Windows Event Logs) generated a Mimikatz-specific dete
 
 ---
 
-## Phase 7: Remediation — KRBTGT Password Reset
+## Phase 7: Remediation — KRBTGT Password Reset 
 
-Following detection, the incident response remediation workflow was executed. The KRBTGT account password must be reset **twice** to fully invalidate all forged Golden Tickets, as Active Directory retains the previous password hash for one replication cycle.
+Following detection, the incident response remediation workflow was executed. Executed the industry-standard "double-tap" password reset on the KRBTGT account to flush the AD password history and fully invalidate all forged Golden Tickets, as Active Directory retains the previous password hash for one replication cycle.
 
 ### Step 14 — KRBTGT Password Reset Remediation
 
@@ -226,7 +227,7 @@ To simulate the impact phase of the attack (MITRE T1490 — Inhibit System Recov
 
 ### Step 17 — Ransomware Telemetry Spike (T1490)
 
-SIEM telemetry captured a significant spike in file system modification events consistent with ransomware activity (T1490). The telemetry confirmed mass file operation events across the target volume, validating that the ransomware simulation generated detectable, high-volume forensic artifacts aligned with real-world ransomware behavior.
+SIEM telemetry captured a massive spike of 40,000+ file system modification events consistent with ransomware activity (T1490). The telemetry confirmed mass file operation events across the target volume, validating that the ransomware simulation generated detectable, high-volume forensic artifacts aligned with real-world ransomware behavior.
 
 ![Ransomware Telemetry Spike T1490](screenshots/17_Ransomware_Telemetry_Spike_T1490.png)
 
