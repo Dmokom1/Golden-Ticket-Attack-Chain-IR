@@ -412,20 +412,6 @@ In a real environment, I would want stronger correlation across endpoint logs, S
 
 ---
 
-# How I Would Explain This Project in an Interview
-
-I built this project to understand how a Golden Ticket attack works and how a defender could investigate it.
-
-In the lab, I used Mimikatz to extract the KRBTGT hash, created a forged Kerberos ticket, injected it into the current session, and validated access to a Domain Controller administrative share. After that, I reviewed the defender side by checking Elastic, Windows security events, KRBTGT remediation logs, memory artifacts with Volatility, browser history with SQLite, and file activity telemetry.
-
-The biggest lesson was that running the attack is only one side of the project. The more important part is knowing what evidence the attack creates, what logs or artifacts can support the timeline, and how to explain the results without overclaiming.
-
-If I were improving this project, I would add more complete Sysmon and EDR telemetry, separate pre-attack and post-attack memory captures more clearly, and build a cleaner detection timeline around Kerberos anomalies, LSASS access, SMB administrative share access, and KRBTGT account changes.
-
----
-
-# Interview Defense Notes
-
 ## What was the main goal?
 
 The main goal was to understand Golden Ticket abuse from both sides: how the attack works and how a defender can investigate the evidence afterward.
