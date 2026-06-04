@@ -30,6 +30,34 @@ This project helped me connect attacker behavior to defender visibility. It also
 
 ## Lab Environment
 
+
+## Architecture
+
+```mermaid
+graph TD
+    A[Attack Simulation] --> B[Credential Access]
+    B --> C[Golden Ticket Creation]
+    C --> D[Authentication Bypass]
+    D --> E[Privileged Access]
+    E --> F[Detection & Investigation]
+    F --> G[Remediation]
+    
+    H[Windows Server 2022 DC] --> I[Active Directory]
+    I --> J[Kerberos Authentication]
+    J --> K[SIEM Integration]
+    
+    L[Forensic Tools] --> M[FTK Imager]
+    L --> N[Volatility 3]
+    L --> O[DB Browser for SQLite]
+    
+    P[Defender Perspective] --> Q[Event Log Analysis]
+    P --> R[Memory Forensics]
+    P --> S[Browser Artifact Review]
+```
+
+*Note: This diagram represents the lab environment and investigation workflow.*
+
+
 | Component | Details |
 |---|---|
 | Domain Controller OS | Windows Server 2022 |
@@ -112,7 +140,7 @@ The memory capture completed successfully and produced an output file for later 
 
 ![FTK Memory Capture Success](screenshots/02_FTK_Memory_Capture_Success.png)
 
-### What this proved
+## What this proved
 
 This confirmed that I could collect a memory image from the Windows Server system and preserve it for later forensic review.
 
@@ -128,7 +156,7 @@ This was done for lab execution only. In a real environment, disabling endpoint 
 
 ![Windows Defender Disabled](screenshots/03_Windows_Defender_Disabled.png)
 
-### What this proved
+## What this proved
 
 This showed the endpoint protection state before running credential access tooling. It also helped separate a lab requirement from real-world security expectations.
 
@@ -148,7 +176,7 @@ The `privilege::debug` command was executed inside Mimikatz. The successful resp
 
 ![Mimikatz Debug Privilege Enabled](screenshots/06_Mimikatz_Debug_Privilege_Enabled.png)
 
-### What this proved
+## What this proved
 
 This confirmed that the lab system allowed Mimikatz to run with elevated privileges.
 
@@ -164,7 +192,7 @@ The KRBTGT account is important because it signs Kerberos Ticket Granting Ticket
 
 ![KRBTGT Hash Dumped](screenshots/07_KRBTGT_Hash_Dumped.png)
 
-### What this proved
+## What this proved
 
 This confirmed that the KRBTGT hash was available in the lab and could be used for the Golden Ticket simulation.
 
@@ -186,7 +214,7 @@ After injection, `klist` was used to confirm that the Kerberos ticket was loaded
 
 ![Kerberos Ticket Validation](screenshots/10_God_Mode_Verification.png)
 
-### What this proved
+## What this proved
 
 This confirmed that the forged ticket was created and loaded into the current session.
 
@@ -204,7 +232,7 @@ I then tested access to the Domain Controller administrative share.
 
 ![Post Exploitation Access Validation](screenshots/12_Post_Exploitation_Access_Validation.png)
 
-### What this proved
+## What this proved
 
 This confirmed that the forged ticket was usable in the lab and allowed access to the administrative share on the Domain Controller.
 
@@ -218,13 +246,13 @@ After the attack simulation, I reviewed Elastic and Windows log evidence to dete
 
 ![Elastic Search for Mimikatz Evidence](screenshots/13_SIEM_Alert_Mimikatz_Detection.png)
 
-### What this proved
+## What this proved
 
 This screenshot supports the Elastic review portion of the lab, but I am careful not to overstate it as perfect detection coverage.
 
 The evidence showed that Mimikatz-related activity could be searched and reviewed in Elastic. The important lesson was learning where an analyst would pivot next, not claiming that one screenshot proves the entire attack chain was automatically detected.
 
-### Analyst reasoning
+## Analyst reasoning
 
 For this type of activity, I would look for evidence such as:
 
@@ -253,13 +281,13 @@ Windows Security Event ID 4738 showed that the KRBTGT account was modified.
 
 ![KRBTGT Account Modified Event 4738](screenshots/16_KRBTGT_Account_Modified_Event_4738.png)
 
-### What this proved
+## What this proved
 
 This confirmed that KRBTGT remediation activity produced Windows log evidence.
 
 The screenshots show Event ID 4724 for password reset activity and Event ID 4738 for account modification activity. In a real environment, KRBTGT remediation must be handled carefully because Active Directory keeps current and previous KRBTGT password material for Kerberos validation.
 
-### What I would monitor
+## What I would monitor
 
 During and after KRBTGT remediation, I would monitor:
 
@@ -278,13 +306,13 @@ I also reviewed a high-volume file activity spike in Elastic using the `Ransomwa
 
 ![Ransomware-Style File Activity Telemetry](screenshots/17_Ransomware_Telemetry_Spike_T1490.png)
 
-### What this proved
+## What this proved
 
 This showed how large volumes of file creation and deletion activity can appear in Elastic.
 
 I treated this as supporting ransomware-style impact telemetry rather than the core Golden Ticket evidence. The main value was seeing how file activity spikes can help an analyst recognize suspicious behavior that may need additional investigation.
 
-### Important limitation
+## Important limitation
 
 High file activity alone does not prove ransomware, and it does not automatically prove a specific MITRE impact technique. It needs supporting context such as:
 
@@ -310,7 +338,7 @@ The database was opened in DB Browser for SQLite and reviewed for URL and visit 
 
 ![Edge History Artifact Analysis](screenshots/19_Edge_History_Artifact_Analysis.png)
 
-### What this proved
+## What this proved
 
 This showed that browser history can support timeline reconstruction during an investigation.
 
@@ -326,7 +354,7 @@ The `windows.pslist` plugin was used to list running processes from the memory i
 
 ![Volatility Process List Analysis](screenshots/20_Volatility_Process_List_Analysis.png)
 
-### What this proved
+## What this proved
 
 This confirmed that I could use Volatility 3 to parse a Windows memory image and review process activity.
 
@@ -474,3 +502,25 @@ No. In this version, Volatility was used for basic memory triage through process
 | `screenshots/18_Edge_History_Database_Extraction.png` | Edge History database location |
 | `screenshots/19_Edge_History_Artifact_Analysis.png` | Edge History database reviewed in DB Browser for SQLite |
 | `screenshots/20_Volatility_Process_List_Analysis.png` | Volatility `windows.pslist` process output |
+
+---
+
+## Repository Information
+
+**Project**: Golden-Ticket-Attack-Chain-IR
+**Author**: Dmokom1  
+**Purpose**: Hands-on cybersecurity lab for skill development
+**Environment**: Isolated home lab with Windows Server 2022 DC
+**Tools**: See "Tools Used" section above
+
+### Usage Notes:
+- This repository documents a learning exercise, not production code
+- All screenshots are from controlled lab environments
+- Techniques demonstrated are for educational purposes only
+- Always follow organizational policies and legal guidelines
+
+### Contributing:
+While this is primarily a personal learning portfolio, suggestions and feedback are welcome. Please open an issue to discuss improvements.
+
+### License:
+MIT License - see [LICENSE](LICENSE) file for details.
