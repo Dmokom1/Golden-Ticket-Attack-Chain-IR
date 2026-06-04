@@ -4,7 +4,7 @@ This project was completed in an isolated Active Directory lab built for securit
 
 ---
 
-## Overview
+## Project Overview
 
 This project simulates a Golden Ticket attack inside an isolated Active Directory lab and focuses on how the activity can be investigated from a defender’s point of view.
 
@@ -14,7 +14,7 @@ The lab includes memory capture with FTK Imager, Mimikatz execution, KRBTGT hash
 
 ---
 
-## Why I Built This
+## Why I Built This Project
 
 Golden Ticket attacks matter because they abuse the trust model behind Kerberos authentication. If the KRBTGT account hash is compromised, an attacker can create forged Kerberos tickets that may be trusted by the domain.
 
@@ -28,8 +28,7 @@ This project helped me connect attacker behavior to defender visibility. It also
 
 ---
 
-## Lab Environment
-
+## Lab Environment & Architecture
 
 ## Architecture
 
@@ -57,7 +56,6 @@ graph TD
 
 *Note: This diagram represents the lab environment and investigation workflow.*
 
-
 | Component | Details |
 |---|---|
 | Domain Controller OS | Windows Server 2022 |
@@ -71,7 +69,7 @@ graph TD
 
 ---
 
-## Tools Used
+## Tools & Technologies Used
 
 | Tool | Purpose |
 |---|---|
@@ -134,11 +132,11 @@ I started by capturing memory with FTK Imager. The purpose was to practice evide
 
 This step matters because memory can contain active processes, loaded modules, credentials, and other volatile artifacts that may not exist on disk after a system is powered off.
 
-![FTK Baseline Memory Capture](screenshots/01_FTK_Baseline_Memory_Capture.png)
+![Lab Screenshot](screenshots/01_FTK_Baseline_Memory_Capture.png)
 
 The memory capture completed successfully and produced an output file for later analysis.
 
-![FTK Memory Capture Success](screenshots/02_FTK_Memory_Capture_Success.png)
+![Lab Screenshot](screenshots/02_FTK_Memory_Capture_Success.png)
 
 ## What this proved
 
@@ -154,7 +152,7 @@ Windows Defender real-time protection was disabled so Mimikatz could run in the 
 
 This was done for lab execution only. In a real environment, disabling endpoint protection would be suspicious behavior by itself and should be investigated immediately.
 
-![Windows Defender Disabled](screenshots/03_Windows_Defender_Disabled.png)
+![Lab Screenshot](screenshots/03_Windows_Defender_Disabled.png)
 
 ## What this proved
 
@@ -166,15 +164,15 @@ This showed the endpoint protection state before running credential access tooli
 
 Mimikatz was extracted on the target system so the credential access portion of the lab could be performed.
 
-![Mimikatz Files Extracted](screenshots/04_Mimikatz_Files_Extracted.png)
+![Lab Screenshot](screenshots/04_Mimikatz_Files_Extracted.png)
 
 Mimikatz was then launched from an elevated session.
 
-![Mimikatz Initialization](screenshots/05_Mimikatz_Initialization.png)
+![Lab Screenshot](screenshots/05_Mimikatz_Initialization.png)
 
 The `privilege::debug` command was executed inside Mimikatz. The successful response confirmed that the process had the required debug privilege to access sensitive process memory.
 
-![Mimikatz Debug Privilege Enabled](screenshots/06_Mimikatz_Debug_Privilege_Enabled.png)
+![Lab Screenshot](screenshots/06_Mimikatz_Debug_Privilege_Enabled.png)
 
 ## What this proved
 
@@ -190,7 +188,7 @@ The KRBTGT account hash was extracted using Mimikatz.
 
 The KRBTGT account is important because it signs Kerberos Ticket Granting Tickets. If this hash is compromised, an attacker can create forged Kerberos tickets that may be accepted by the domain.
 
-![KRBTGT Hash Dumped](screenshots/07_KRBTGT_Hash_Dumped.png)
+![Lab Screenshot](screenshots/07_KRBTGT_Hash_Dumped.png)
 
 ## What this proved
 
@@ -204,15 +202,15 @@ The important defender takeaway is simple: KRBTGT compromise is serious because 
 
 A forged Kerberos Ticket Granting Ticket was created using the KRBTGT hash, the domain SID, and the target domain information.
 
-![Golden Ticket Forged](screenshots/08_Golden_Ticket_Forged.png)
+![Lab Screenshot](screenshots/08_Golden_Ticket_Forged.png)
 
 The forged ticket was then injected into the current session.
 
-![Golden Ticket Injected](screenshots/09_Golden_Ticket_Injected.png)
+![Lab Screenshot](screenshots/09_Golden_Ticket_Injected.png)
 
 After injection, `klist` was used to confirm that the Kerberos ticket was loaded in the current session. The ticket showed the `Administrator` client in the `cs.local` domain and a long validity window, which matched the lab configuration.
 
-![Kerberos Ticket Validation](screenshots/10_God_Mode_Verification.png)
+![Lab Screenshot](screenshots/10_God_Mode_Verification.png)
 
 ## What this proved
 
@@ -226,11 +224,11 @@ I kept the original screenshot filename for path compatibility, but the professi
 
 After the ticket was injected, I validated the session context and group membership.
 
-![Golden Ticket Injection Verification](screenshots/11_Golden_Ticket_Injection_Verification.png)
+![Lab Screenshot](screenshots/11_Golden_Ticket_Injection_Verification.png)
 
 I then tested access to the Domain Controller administrative share.
 
-![Post Exploitation Access Validation](screenshots/12_Post_Exploitation_Access_Validation.png)
+![Lab Screenshot](screenshots/12_Post_Exploitation_Access_Validation.png)
 
 ## What this proved
 
@@ -244,7 +242,7 @@ From an incident response point of view, this is the impact: a forged Kerberos t
 
 After the attack simulation, I reviewed Elastic and Windows log evidence to determine what activity was visible.
 
-![Elastic Search for Mimikatz Evidence](screenshots/13_SIEM_Alert_Mimikatz_Detection.png)
+![Lab Screenshot](screenshots/13_SIEM_Alert_Mimikatz_Detection.png)
 
 ## What this proved
 
@@ -271,15 +269,15 @@ For this type of activity, I would look for evidence such as:
 
 After validating the Golden Ticket behavior, I performed KRBTGT password reset remediation in the lab.
 
-![KRBTGT Password Reset Remediation](screenshots/14_KRBTGT_Password_Reset_Remediation.png)
+![Lab Screenshot](screenshots/14_KRBTGT_Password_Reset_Remediation.png)
 
 I then reviewed log evidence showing the password reset activity.
 
-![KRBTGT Remediation Log Validation](screenshots/15_KRBTGT_Remediation_Log_Validation.png)
+![Lab Screenshot](screenshots/15_KRBTGT_Remediation_Log_Validation.png)
 
 Windows Security Event ID 4738 showed that the KRBTGT account was modified.
 
-![KRBTGT Account Modified Event 4738](screenshots/16_KRBTGT_Account_Modified_Event_4738.png)
+![Lab Screenshot](screenshots/16_KRBTGT_Account_Modified_Event_4738.png)
 
 ## What this proved
 
@@ -304,7 +302,7 @@ During and after KRBTGT remediation, I would monitor:
 
 I also reviewed a high-volume file activity spike in Elastic using the `RansomwareTest` path.
 
-![Ransomware-Style File Activity Telemetry](screenshots/17_Ransomware_Telemetry_Spike_T1490.png)
+![Lab Screenshot](screenshots/17_Ransomware_Telemetry_Spike_T1490.png)
 
 ## What this proved
 
@@ -332,11 +330,11 @@ I reviewed Microsoft Edge browser history as a supporting forensic artifact.
 
 The Edge history database was located in the Administrator profile.
 
-![Edge History Database Extraction](screenshots/18_Edge_History_Database_Extraction.png)
+![Lab Screenshot](screenshots/18_Edge_History_Database_Extraction.png)
 
 The database was opened in DB Browser for SQLite and reviewed for URL and visit activity.
 
-![Edge History Artifact Analysis](screenshots/19_Edge_History_Artifact_Analysis.png)
+![Lab Screenshot](screenshots/19_Edge_History_Artifact_Analysis.png)
 
 ## What this proved
 
@@ -352,7 +350,7 @@ Volatility 3 was used to inspect a captured memory image.
 
 The `windows.pslist` plugin was used to list running processes from the memory image.
 
-![Volatility Process List Analysis](screenshots/20_Volatility_Process_List_Analysis.png)
+![Lab Screenshot](screenshots/20_Volatility_Process_List_Analysis.png)
 
 ## What this proved
 
@@ -364,7 +362,7 @@ Process listing is only a starting point. Deeper analysis would require addition
 
 ---
 
-# Key Findings
+# Key Findings & Analysis
 
 ## 1. KRBTGT compromise is high-impact
 
