@@ -520,5 +520,3 @@ No. In this version, Volatility was used for basic memory triage through process
 ### Contributing:
 While this is primarily a personal learning portfolio, suggestions and feedback are welcome. Please open an issue to discuss improvements.
 
-### License:
-MIT License - see [LICENSE](LICENSE) file for details.
