@@ -1,9 +1,5 @@
 # Build Notes: Golden-Ticket-Attack-Chain-IR
 
-*This document provides detailed technical context for the lab build.*
-*Generated: 2026-06-03*
-
----
 
 # Build Notes
 # Golden Ticket Attack Chain: Incident Response and Forensic Evidence Lab
